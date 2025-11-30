@@ -26,8 +26,9 @@ const styles = {
     color: "#2563eb",
   },
   cardRow: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr)",
+    // responsive: row on large screens, column on small screens
+    display: "flex",
+    flexWrap: "wrap",
     gap: "1rem",
   },
   card: {
