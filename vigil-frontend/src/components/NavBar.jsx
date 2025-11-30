@@ -2,7 +2,7 @@ import React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useLang } from "../LanguageContext";
 import { setAuthToken } from "../api";
-import { FiSettings } from "react-icons/fi";
+import { FiSettings, FiHome, FiUsers } from "react-icons/fi";
 
 const navStyles = {
   nav: {
@@ -87,29 +87,44 @@ function NavBar({ user, setUser }) {
   return (
     <nav style={navStyles.nav}>
       <div style={navStyles.left}>
-        <span style={navStyles.appName}>{t.appName}</span>
+        <span style={navStyles.appName}>{t.appName} <img src="/vite.svg" alt="Logo" style={{
+          width: "20px",
+          height: "20px",
+          verticalAlign: "middle",
+        }} /></span>
       </div>
 
       <div style={navStyles.center}>
         {token && (
           <>
-            <Link to="/" style={navStyles.link} title="Dashboard">
-              {t.dashboard}
+            <Link
+              to="/"
+              style={navStyles.link}
+              title={t.dashboard}
+              aria-label={t.dashboard}
+            >
+              <FiHome size={18} />
             </Link>
-            <Link to="/family" style={navStyles.link} title="Family members">
-              {t.family}
+            <Link
+              to="/family"
+              style={navStyles.link}
+              title={t.family}
+              aria-label={t.family}
+            >
+              <FiUsers size={18} />
             </Link>
             <Link
               to="/settings"
               style={navStyles.link}
-              title="Configure emergency and notification settings"
+              title={t.settings}
+              aria-label={t.settings}
             >
-              <FiSettings style={navStyles.iconInline} />
-              {t.settings}
+              <FiSettings size={18} />
             </Link>
           </>
         )}
       </div>
+
 
       <div style={navStyles.right}>
         <span style={{ fontSize: "0.8rem", color: "#d1d5db" }}>
