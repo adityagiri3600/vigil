@@ -1,3 +1,5 @@
-flask
-flask_cors
-pyjwt
+Flask==3.0.0
+flask-cors==4.0.0
+PyJWT==2.8.0
+pywebpush==2.0.0
+cryptography==42.0.2
