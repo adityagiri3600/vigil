@@ -1,6 +1,8 @@
+// src/features/settings/SettingsPage.jsx
 import React, { useEffect, useState } from "react";
 import api from "../../api";
 import { useLang } from "../../LanguageContext";
+import { enablePushNotifications } from "../../push";
 import { FiPhoneCall, FiBell, FiAlertTriangle, FiVideo } from "react-icons/fi";
 
 const styles = {
@@ -58,6 +60,7 @@ const styles = {
     display: "flex",
     justifyContent: "flex-start",
     gap: "0.5rem",
+    flexWrap: "wrap",
   },
   saveButton: {
     border: "none",
@@ -83,6 +86,7 @@ function SettingsPage() {
   const [settings, setSettings] = useState(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [pushLoading, setPushLoading] = useState(false);
 
   const loadSettings = async () => {
     const res = await api.get("/settings");
@@ -109,9 +113,28 @@ function SettingsPage() {
       setSettings(res.data);
       setMessage(t.settingsSaved);
     } catch (e) {
+      console.error(e);
       setMessage("Error saving settings");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleEnablePush = async () => {
+    setPushLoading(true);
+    setMessage("");
+    try {
+      await enablePushNotifications();
+      setMessage(
+        t.settingsSaved + " (Notifications enabled on this device)"
+      );
+    } catch (e) {
+      console.error(e);
+      setMessage(
+        e?.message || "Unable to enable notifications on this device"
+      );
+    } finally {
+      setPushLoading(false);
     }
   };
 
@@ -186,7 +209,10 @@ function SettingsPage() {
             min={0}
             value={settings.auto_call_delay_seconds || 0}
             onChange={(e) =>
-              handleChange("auto_call_delay_seconds", Number(e.target.value))
+              handleChange(
+                "auto_call_delay_seconds",
+                Number(e.target.value)
+              )
             }
           />
         </div>
@@ -283,6 +309,20 @@ function SettingsPage() {
             disabled={saving}
           >
             {saving ? "Saving..." : t.save}
+          </button>
+
+          <button
+            type="button"
+            style={{
+              ...styles.saveButton,
+              backgroundColor: "#10b981",
+            }}
+            onClick={handleEnablePush}
+            disabled={pushLoading}
+          >
+            {pushLoading
+              ? "Enabling..."
+              : "Enable notifications on this device"}
           </button>
         </div>
 

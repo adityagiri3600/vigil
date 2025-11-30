@@ -4,6 +4,10 @@ import jwt
 import datetime
 import os
 
+import json
+from pywebpush import webpush, WebPushException
+
+
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -31,6 +35,15 @@ DEFAULT_SETTINGS = {
     "fall_detection_sensitivity": "medium",  # low | medium | high
     "video_streaming_enabled": False,
 }
+
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "BNkcdEiq6zQ4uqiGLwuFXzgNO4-DCwnA5VrtSN2IGHeKRZryD09BXpYhPGuj-8rnVXhKI3NVldJhZEI1nk25uiM")
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "KOIrBACUp3tAjARjQ9sxRYs7W89cF5s41H6n6_PzSjY")
+VAPID_CLAIMS = {
+    "sub": "mailto:tootsydeshmukh@gmail.com"
+}
+
+PUSH_SUBSCRIPTIONS = {}  # family_id -> [subscription dicts]
+
 
 # Seed demo data
 def seed_data():
@@ -420,6 +433,76 @@ def update_device_settings(device_id):
         "device_settings": device_settings,
         "effective_settings": effective,
     })
+
+@app.route("/api/devices/<device_id>/demo-alert", methods=["POST"])
+@token_required
+def demo_alert(device_id):
+    family_id = request.family_id
+    dev = next(
+        (d for d in DEVICES if d["id"] == device_id and d["family_id"] == family_id),
+        None,
+    )
+    if not dev:
+        return jsonify({"error": "Device not found"}), 404
+
+    # Create a dummy alert in memory
+    alert = {
+        "family_id": family_id,
+        "type": "demo",
+        "severity": "medium",
+        "room": dev["room"],
+        "message_en": f"Demo alert from {dev['name']}",
+        "message_ko": f"테스트 알림: {dev['name']}",
+        "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    ALERTS.insert(0, alert)
+
+    # Build push payload
+    payload = {
+        "title": "VIGIL Demo Alert",
+        "body": f"{dev['name']} in {dev['room']} sent a demo alert.",
+        "url": "/",  # page to open on click
+    }
+
+    subs = PUSH_SUBSCRIPTIONS.get(family_id, [])
+    for sub in list(subs):
+        try:
+            webpush(
+                subscription_info=sub,
+                data=json.dumps(payload),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims=VAPID_CLAIMS,
+            )
+        except WebPushException as ex:
+            print("WebPush failed:", repr(ex))
+            # You could remove dead subscriptions here if desired
+
+    return jsonify({"status": "sent"})
+
+    
+    
+    
+
+@app.route("/api/push/subscribe", methods=["POST"])
+@token_required
+def push_subscribe():
+    family_id = request.family_id
+    subscription = request.json
+
+    if not subscription or "endpoint" not in subscription:
+        return jsonify({"error": "Missing subscription"}), 400
+
+    subs = PUSH_SUBSCRIPTIONS.get(family_id, [])
+    endpoints = [s.get("endpoint") for s in subs]
+
+    # simple dedupe by endpoint
+    if subscription["endpoint"] not in endpoints:
+        subs.append(subscription)
+
+    PUSH_SUBSCRIPTIONS[family_id] = subs
+    return jsonify({"status": "ok"})
+
+
 
 
 

@@ -121,6 +121,20 @@ function DevicePage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
+  const handleDemoAlert = async () => {
+    setSaving(true);
+    setMessage("");
+    try {
+      await api.post(`/devices/${deviceId}/demo-alert`);
+      setMessage("Demo alert sent (check notifications)");
+    } catch (e) {
+      console.error(e);
+      setMessage("Error sending demo alert");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const loadDevice = async () => {
     const res = await api.get(`/devices/${deviceId}`);
     setDevice(res.data.device);
@@ -331,14 +345,30 @@ function DevicePage() {
             </select>
           </div>
 
-          <button
-            style={styles.saveButton}
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? "Saving..." : t.save}
-          </button>
+          <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem" }}>
+            <button
+              style={styles.saveButton}
+              onClick={handleSave}
+              disabled={saving}
+            >
+              {saving ? "Saving..." : t.save}
+            </button>
+
+            <button
+              type="button"
+              style={{
+                ...styles.saveButton,
+                backgroundColor: "#f97316",
+              }}
+              onClick={handleDemoAlert}
+              disabled={saving}
+            >
+              Send demo alert
+            </button>
+          </div>
+
           {message && <div style={styles.message}>{message}</div>}
+
         </div>
 
         {/* Read-only overview */}
