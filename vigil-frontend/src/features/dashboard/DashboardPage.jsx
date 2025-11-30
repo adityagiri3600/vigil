@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api from "../../api";
 import { useLang } from "../../LanguageContext";
+import {
+  FiAlertTriangle,
+  FiActivity,
+  FiCamera,
+  FiCpu,
+} from "react-icons/fi";
 
 const styles = {
   page: {
@@ -60,6 +67,12 @@ const styles = {
     marginBottom: "0.75rem",
     fontSize: "1rem",
     fontWeight: 600,
+    display: "flex",
+    alignItems: "center",
+    gap: "0.35rem",
+  },
+  icon: {
+    verticalAlign: "middle",
   },
   // alert timeline
   alertTimelineWrapper: {
@@ -111,8 +124,10 @@ const styles = {
     alignItems: "center",
     marginBottom: "0.25rem",
   },
-  deviceName: {
+  deviceNameLink: {
     fontWeight: 500,
+    color: "#111827",
+    textDecoration: "none",
   },
   deviceStatusBadge: (status) => ({
     padding: "0.15rem 0.5rem",
@@ -217,9 +232,11 @@ const styles = {
     position: "relative",
     borderRadius: "0.75rem",
     overflow: "hidden",
+    height: "260px", // adjust this to make camera bigger/smaller
   },
   cameraImage: {
     width: "100%",
+    height: "100%",
     display: "block",
     objectFit: "cover",
   },
@@ -268,11 +285,8 @@ function DashboardPage() {
     return () => clearInterval(id);
   }, []);
 
-  // Realtime clock, updates every second
   useEffect(() => {
-    const id = setInterval(() => {
-      setClock(new Date());
-    }, 1000);
+    const id = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -288,8 +302,8 @@ function DashboardPage() {
   };
 
   const clockString = clock
-    .toLocaleTimeString("en-GB", { hour12: false }) // HH:MM:SS 24h
-    .slice(0, 8); // just in case locale adds extras
+    .toLocaleTimeString("en-GB", { hour12: false })
+    .slice(0, 8);
 
   return (
     <div style={styles.page}>
@@ -298,7 +312,10 @@ function DashboardPage() {
       {/* SUMMARY BAR */}
       {summary && (
         <div style={styles.summaryGrid}>
-          <div style={styles.summaryCard}>
+          <div
+            style={styles.summaryCard}
+            title="Overall system status for this family."
+          >
             <div style={styles.summaryTitle}>{t.overview}</div>
             <div
               style={{
@@ -314,21 +331,30 @@ function DashboardPage() {
               {getStatusLabel(summary.status)}
             </div>
           </div>
-          <div style={styles.summaryCard}>
+          <div
+            style={styles.summaryCard}
+            title="Number of sensors currently online."
+          >
             <div style={styles.summaryLabel}>{t.devices}</div>
             <div style={styles.summaryValue}>
               {summary.devices_online ?? 0}
             </div>
             <div style={styles.summarySub}>online</div>
           </div>
-          <div style={styles.summaryCard}>
+          <div
+            style={styles.summaryCard}
+            title="Alerts in the last 24 hours."
+          >
             <div style={styles.summaryLabel}>{t.alertsCount}</div>
             <div style={styles.summaryValue}>
               {summary.alerts_last_24h ?? 0}
             </div>
             <div style={styles.summarySub}>last 24h</div>
           </div>
-          <div style={styles.summaryCard}>
+          <div
+            style={styles.summaryCard}
+            title="High-severity alerts that may require attention."
+          >
             <div style={styles.summaryLabel}>Critical</div>
             <div style={styles.summaryValue}>
               {summary.critical_alerts ?? 0}
@@ -342,7 +368,13 @@ function DashboardPage() {
       <div style={styles.grid}>
         {/* Alerts timeline */}
         <section style={styles.card}>
-          <h3 style={styles.cardTitle}>{t.alerts}</h3>
+          <h3
+            style={styles.cardTitle}
+            title="Recent safety alerts in chronological order."
+          >
+            <FiAlertTriangle style={styles.icon} />
+            {t.alerts}
+          </h3>
           <div style={styles.alertTimelineWrapper}>
             {alerts.length === 0 && <p>{t.noAlerts}</p>}
             {alerts.map((a, idx) => (
@@ -362,11 +394,23 @@ function DashboardPage() {
 
         {/* Devices panel */}
         <section style={styles.card}>
-          <h3 style={styles.cardTitle}>{t.devices}</h3>
+          <h3
+            style={styles.cardTitle}
+            title="Sensors currently associated with this family."
+          >
+            <FiCpu style={styles.icon} />
+            {t.devices}
+          </h3>
           {devices.map((d) => (
             <div key={d.id} style={styles.deviceItem}>
               <div style={styles.deviceMain}>
-                <span style={styles.deviceName}>{d.name}</span>
+                <Link
+                  to={`/device/${d.id}`}
+                  style={styles.deviceNameLink}
+                  title="Open device details and settings"
+                >
+                  {d.name}
+                </Link>
                 <span style={styles.deviceStatusBadge(d.status)}>
                   {d.status}
                 </span>
@@ -380,7 +424,13 @@ function DashboardPage() {
 
         {/* Activity timeline bars */}
         <section style={styles.card}>
-          <h3 style={styles.cardTitle}>{t.activityTimeline}</h3>
+          <h3
+            style={styles.cardTitle}
+            title="Activity (motion) counts across the day."
+          >
+            <FiActivity style={styles.icon} />
+            {t.activityTimeline}
+          </h3>
           <div style={styles.timelineChart}>
             {activityTimeline.map((point, idx) => {
               const maxVal = Math.max(
@@ -400,7 +450,13 @@ function DashboardPage() {
 
         {/* Room usage grid */}
         <section style={styles.card}>
-          <h3 style={styles.cardTitle}>{t.roomUsage}</h3>
+          <h3
+            style={styles.cardTitle}
+            title="Which rooms are being used the most today."
+          >
+            <FiActivity style={styles.icon} />
+            {t.roomUsage}
+          </h3>
           <div style={styles.roomGrid}>
             {Object.entries(roomStats).map(([room, count]) => {
               const intensity =
@@ -418,7 +474,13 @@ function DashboardPage() {
 
         {/* Safety score */}
         <section style={styles.card}>
-          <h3 style={styles.cardTitle}>{t.safetyScore}</h3>
+          <h3
+            style={styles.cardTitle}
+            title="Derived score combining alerts, device health, and activity."
+          >
+            <FiAlertTriangle style={styles.icon} />
+            {t.safetyScore}
+          </h3>
           {safetyScore && (
             <div style={styles.safetyWrapper}>
               <div style={styles.safetyCircle}>
@@ -435,7 +497,11 @@ function DashboardPage() {
 
         {/* Today vs yesterday */}
         <section style={styles.card}>
-          <h3 style={styles.cardTitle}>
+          <h3
+            style={styles.cardTitle}
+            title="Comparison of alerts and motion between today and yesterday."
+          >
+            <FiActivity style={styles.icon} />
             {t.today} vs {t.yesterday}
           </h3>
           <div style={styles.compareGrid}>
@@ -470,12 +536,17 @@ function DashboardPage() {
 
         {/* Camera feed – static image + realtime clock */}
         <section style={styles.card}>
-          <h3 style={styles.cardTitle}>{t.cameraFeed}</h3>
+          <h3
+            style={styles.cardTitle}
+            title="Simulated camera view. In a real deployment, this would be a live feed."
+          >
+            <FiCamera style={styles.icon} />
+            {t.cameraFeed}
+          </h3>
           <div style={styles.cameraContainer}>
             <div style={styles.clockOverlay}>{clockString}</div>
-            {/* Make sure you have /public/camera_demo.jpg */}
             <img
-              src="/image.png"
+              src="/camera_demo.jpg"
               alt="Camera feed"
               style={styles.cameraImage}
             />

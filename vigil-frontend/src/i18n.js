@@ -20,7 +20,6 @@ export const translations = {
     noAccount: "Don't have an account?",
     familyIdOptional: "Family ID (optional, to join existing)",
 
-    // NEW:
     safetyScore: "Safety score",
     today: "Today",
     yesterday: "Yesterday",
@@ -30,6 +29,27 @@ export const translations = {
     overview: "Overview",
     activityTimeline: "Activity timeline",
     roomUsage: "Room usage",
+
+    // NEW for settings / device
+    settings: "Settings",
+    globalSettings: "Family-wide settings",
+    emergencyNumber: "Emergency number",
+    autoCallEmergency: "Auto-call emergency services",
+    autoCallDelaySeconds: "Auto-call delay (seconds)",
+    notifyFamilyPush: "Notify family via app",
+    notifyFamilySms: "Notify family via SMS",
+    fallDetectionSensitivity: "Fall detection sensitivity",
+    sensitivityLow: "Low",
+    sensitivityMedium: "Medium",
+    sensitivityHigh: "High",
+    videoStreamingEnabled: "Allow video streaming on incidents",
+    save: "Save",
+    settingsSaved: "Settings saved",
+    deviceSettings: "Device settings",
+    familySettings: "Family settings",
+    effectiveSettings: "Effective settings applied to sensor",
+    devicePage: "Device",
+    backToDashboard: "Back to dashboard",
   },
   ko: {
     appName: "VIGIL – 노인 안전",
@@ -52,7 +72,6 @@ export const translations = {
     noAccount: "계정이 없으신가요?",
     familyIdOptional: "가족 ID (기존 가족 합류용, 선택)",
 
-    // NEW:
     safetyScore: "안전 점수",
     today: "오늘",
     yesterday: "어제",
@@ -62,5 +81,26 @@ export const translations = {
     overview: "요약",
     activityTimeline: "활동 타임라인",
     roomUsage: "방별 사용량",
+
+    // NEW for settings / device
+    settings: "설정",
+    globalSettings: "가족 전체 설정",
+    emergencyNumber: "긴급 전화 번호",
+    autoCallEmergency: "자동으로 긴급 전화를 걸기",
+    autoCallDelaySeconds: "자동 전화 지연 시간 (초)",
+    notifyFamilyPush: "앱 알림으로 가족에게 알리기",
+    notifyFamilySms: "SMS로 가족에게 알리기",
+    fallDetectionSensitivity: "낙상 감지 민감도",
+    sensitivityLow: "낮음",
+    sensitivityMedium: "보통",
+    sensitivityHigh: "높음",
+    videoStreamingEnabled: "사고 시 영상 스트리밍 허용",
+    save: "저장",
+    settingsSaved: "설정이 저장되었습니다",
+    deviceSettings: "기기 설정",
+    familySettings: "가족 설정",
+    effectiveSettings: "센서에 적용된 최종 설정",
+    devicePage: "기기",
+    backToDashboard: "대시보드로 돌아가기",
   },
 };

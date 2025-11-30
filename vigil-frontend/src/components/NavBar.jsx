@@ -2,6 +2,7 @@ import React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useLang } from "../LanguageContext";
 import { setAuthToken } from "../api";
+import { FiSettings } from "react-icons/fi";
 
 const navStyles = {
   nav: {
@@ -11,39 +12,47 @@ const navStyles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: "1rem",
+    gap: "0.75rem",
+    flexWrap: "wrap",            // ⬅️ allow wrapping on small screens
   },
   left: {
     display: "flex",
     alignItems: "center",
+    flexShrink: 0,
   },
   center: {
     display: "flex",
     alignItems: "center",
-    gap: "0.75rem",
+    gap: "0.5rem",
+    flexWrap: "wrap",            // ⬅️ links can wrap instead of overflowing
+    flex: "1 1 auto",
+    justifyContent: "center",
+    minWidth: 0,
   },
   right: {
     display: "flex",
     alignItems: "center",
-    gap: "0.5rem",
+    gap: "0.4rem",
+    flexWrap: "wrap",            // ⬅️ language/buttons can wrap too
+    flexShrink: 0,
+    marginLeft: "auto",
   },
   appName: {
     fontWeight: 600,
-    fontSize: "0.95rem",
+    fontSize: "0.9rem",          // ⬅️ slightly smaller to fit better
+    whiteSpace: "nowrap",
   },
   link: {
     color: "#e5e7eb",
     textDecoration: "none",
-    fontSize: "0.9rem",
-  },
-  linkHover: {
-    textDecoration: "underline",
+    fontSize: "0.85rem",         // ⬅️ slightly smaller
+    whiteSpace: "nowrap",
   },
   langButton: (active) => ({
     border: "none",
     background: "transparent",
     color: active ? "#ffffff" : "#9ca3af",
-    fontSize: "0.85rem",
+    fontSize: "0.8rem",
     cursor: "pointer",
     textDecoration: active ? "underline" : "none",
     fontWeight: active ? 600 : 400,
@@ -56,6 +65,11 @@ const navStyles = {
     borderRadius: "9999px",
     fontSize: "0.8rem",
     cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  iconInline: {
+    verticalAlign: "middle",
+    marginRight: "0.25rem",
   },
 };
 
@@ -79,11 +93,19 @@ function NavBar({ user, setUser }) {
       <div style={navStyles.center}>
         {token && (
           <>
-            <Link to="/" style={navStyles.link}>
+            <Link to="/" style={navStyles.link} title="Dashboard">
               {t.dashboard}
             </Link>
-            <Link to="/family" style={navStyles.link}>
+            <Link to="/family" style={navStyles.link} title="Family members">
               {t.family}
+            </Link>
+            <Link
+              to="/settings"
+              style={navStyles.link}
+              title="Configure emergency and notification settings"
+            >
+              <FiSettings style={navStyles.iconInline} />
+              {t.settings}
             </Link>
           </>
         )}

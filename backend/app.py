@@ -16,8 +16,21 @@ JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key")
 # -------------------------
 USERS = {}      # email -> {password, name, family_id}
 FAMILIES = {}   # family_id -> [emails]
-ALERTS = []     # list of {family_id, ...}
-DEVICES = []    # list of {family_id, ...}
+ALERTS = []     # list of alerts
+DEVICES = []    # list of devices
+
+FAMILY_SETTINGS = {}  # family_id -> settings dict
+DEVICE_SETTINGS = {}  # device_id -> settings dict
+
+DEFAULT_SETTINGS = {
+    "emergency_number": "119",
+    "auto_call_emergency": True,
+    "auto_call_delay_seconds": 60,
+    "notify_family_push": True,
+    "notify_family_sms": False,
+    "fall_detection_sensitivity": "medium",  # low | medium | high
+    "video_streaming_enabled": False,
+}
 
 # Seed demo data
 def seed_data():
@@ -70,6 +83,19 @@ def seed_data():
             "time": "2025-11-30 10:30",
         },
     ])
+
+    # Family-wide default settings
+    FAMILY_SETTINGS[family_id] = DEFAULT_SETTINGS.copy()
+
+    # Per-device settings initially follow key emergency-related settings
+    for dev in DEVICES:
+        DEVICE_SETTINGS[dev["id"]] = {
+            "emergency_number": DEFAULT_SETTINGS["emergency_number"],
+            "auto_call_emergency": DEFAULT_SETTINGS["auto_call_emergency"],
+            "auto_call_delay_seconds": DEFAULT_SETTINGS["auto_call_delay_seconds"],
+            "fall_detection_sensitivity": DEFAULT_SETTINGS["fall_detection_sensitivity"],
+        }
+
 
 seed_data()
 
@@ -289,6 +315,104 @@ def family_members():
 @app.route("/api/health")
 def health():
     return {"status": "ok"}
+
+
+# -------------------------
+# Settings
+# -------------------------
+@app.route("/api/settings", methods=["GET", "POST"])
+@token_required
+def settings():
+    family_id = request.family_id
+
+    # GET: return current settings (or defaults)
+    if request.method == "GET":
+        settings = FAMILY_SETTINGS.get(family_id) or DEFAULT_SETTINGS.copy()
+        FAMILY_SETTINGS[family_id] = settings
+        return jsonify(settings)
+
+    # POST: update settings
+    data = request.json or {}
+    settings = FAMILY_SETTINGS.get(family_id) or DEFAULT_SETTINGS.copy()
+
+    for key in DEFAULT_SETTINGS.keys():
+        if key in data:
+            settings[key] = data[key]
+
+    FAMILY_SETTINGS[family_id] = settings
+
+    # Simulate "pushing" relevant settings to all sensors for that family
+    for dev in DEVICES:
+        if dev["family_id"] == family_id:
+            dev_id = dev["id"]
+            dev_settings = DEVICE_SETTINGS.get(dev_id) or {}
+            # sync a subset of settings to each sensor if not overridden
+            for key in ["emergency_number", "auto_call_emergency", "auto_call_delay_seconds"]:
+                if key in settings and key not in dev_settings:
+                    dev_settings[key] = settings[key]
+            DEVICE_SETTINGS[dev_id] = dev_settings
+            dev["sensor_settings"] = dev_settings  # purely informational
+
+    return jsonify(settings)
+
+
+
+@app.route("/api/devices/<device_id>", methods=["GET"])
+@token_required
+def get_device(device_id):
+    family_id = request.family_id
+    dev = next(
+        (d for d in DEVICES if d["id"] == device_id and d["family_id"] == family_id),
+        None,
+    )
+    if not dev:
+        return jsonify({"error": "Device not found"}), 404
+
+    family_settings = FAMILY_SETTINGS.get(family_id) or DEFAULT_SETTINGS.copy()
+    device_settings = DEVICE_SETTINGS.get(device_id) or {}
+    effective = family_settings.copy()
+    effective.update(device_settings)  # device overrides
+
+    return jsonify({
+        "device": dev,
+        "family_settings": family_settings,
+        "device_settings": device_settings,
+        "effective_settings": effective,
+    })
+
+
+@app.route("/api/devices/<device_id>/settings", methods=["POST"])
+@token_required
+def update_device_settings(device_id):
+    family_id = request.family_id
+    dev = next(
+        (d for d in DEVICES if d["id"] == device_id and d["family_id"] == family_id),
+        None,
+    )
+    if not dev:
+        return jsonify({"error": "Device not found"}), 404
+
+    data = request.json or {}
+    device_settings = DEVICE_SETTINGS.get(device_id) or {}
+
+    for key in DEFAULT_SETTINGS.keys():
+        if key in data:
+            device_settings[key] = data[key]
+
+    DEVICE_SETTINGS[device_id] = device_settings
+    # simulate applying settings on the sensor
+    dev["sensor_settings"] = device_settings
+
+    family_settings = FAMILY_SETTINGS.get(family_id) or DEFAULT_SETTINGS.copy()
+    effective = family_settings.copy()
+    effective.update(device_settings)
+
+    return jsonify({
+        "device_settings": device_settings,
+        "effective_settings": effective,
+    })
+
+
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)

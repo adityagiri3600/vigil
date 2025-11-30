@@ -4,6 +4,8 @@ import LoginPage from "./features/auth/LoginPage";
 import SignupPage from "./features/auth/SignupPage";
 import DashboardPage from "./features/dashboard/DashboardPage";
 import FamilyPage from "./features/family/FamilyPage";
+import SettingsPage from "./features/settings/SettingsPage";
+import DevicePage from "./features/devices/DevicePage";
 import NavBar from "./components/NavBar";
 
 function ProtectedRoute({ children }) {
@@ -19,8 +21,7 @@ function App() {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    // For this simple demo, we just rely on localStorage token
-    // You can store user info there too if you want.
+    // keep as-is or later add /me endpoint
   }, []);
 
   return (
@@ -42,6 +43,22 @@ function App() {
           element={
             <ProtectedRoute>
               <FamilyPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <SettingsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/device/:deviceId"
+          element={
+            <ProtectedRoute>
+              <DevicePage />
             </ProtectedRoute>
           }
         />
