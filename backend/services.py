@@ -2,7 +2,7 @@ import datetime
 import uuid
 import json
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from pywebpush import webpush, WebPushException
 
@@ -346,13 +346,15 @@ def handle_device_event(token: str, payload: Dict[str, Any]) -> Optional[Dict[st
         if not dev:
             return None
 
-        # heartbeat: just update status / last_seen
+        ts_utc = timestamp.astimezone(datetime.timezone.utc)
+        dev.last_seen = ts_utc.isoformat().replace("+00:00", "Z")
+        dev.status = "online"
+
         if event_type == "heartbeat":
-            dev.status = "online"
-            dev.last_seen = timestamp.isoformat() + "Z"
+            # heartbeat: nothing more to do
             return {"status": "ok", "device_id": dev.id}
 
-        # otherwise create an alert row
+        # Otherwise: create alert
         alert = Alert(
             family_id=dev.family_id,
             type=event_type,
@@ -361,7 +363,7 @@ def handle_device_event(token: str, payload: Dict[str, Any]) -> Optional[Dict[st
             message_en=payload.get(
                 "message_en", f"{event_type.capitalize()} event from device {dev.id}"
             ),
-            message_ko=payload.get("message_ko"),
+            message_ko=payload.get("message_ko", None),
             time=timestamp,
         )
         db.add(alert)
@@ -637,6 +639,31 @@ def subscribe_push(family_id: str, subscription: Dict[str, Any]) -> None:
 # ---------- DASHBOARD AGGREGATION ----------
 
 def get_dashboard_data(family_id: str) -> Dict[str, Any]:
+    ONLINE_GRACE_SECONDS = 60
+
+    def compute_device_status(last_seen: Optional[str], stored_status: Optional[str]) -> str:
+        """Return 'online' or 'offline' from last_seen; treat parse failures as offline."""
+        s = (last_seen or "").strip()
+        if not s or s == "never":
+            return "offline"
+        try:
+            if s.endswith("Z"):
+                # 'YYYY-mm-ddTHH:MM:SS(.fff)Z'
+                dt = datetime.datetime.fromisoformat(s[:-1]).replace(tzinfo=datetime.timezone.utc)
+            else:
+                # 'YYYY-mm-ddTHH:MM:SS(.fff)+HH:MM' or naive
+                dt = datetime.datetime.fromisoformat(s)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            delta = now_utc - dt.astimezone(datetime.timezone.utc)
+            return "online" if delta.total_seconds() <= ONLINE_GRACE_SECONDS else "offline"
+        except Exception:
+            # malformed strings (e.g. "+00:00Z") → offline
+            return "offline"
+
+
+
     with db_session() as db:
         devices = (
             db.query(Device)
@@ -651,19 +678,25 @@ def get_dashboard_data(family_id: str) -> Dict[str, Any]:
             .all()
         )
 
-    devices_online = sum(1 for d in devices if d.status == "online")
+    # compute effective status for each device
+    effective_devices: List[Tuple[Device, str]] = []
+    for d in devices:
+        status = compute_device_status(d.last_seen, d.status)
+        effective_devices.append((d, status))
+
+    devices_online = sum(1 for _, status in effective_devices if status == "online")
     alerts_last_24h = len(alerts)  # todo: filter by time if needed
     critical_alerts = sum(1 for a in alerts if a.severity == "high")
 
     if critical_alerts > 0:
-        status = "critical"
+        overall_status = "critical"
     elif alerts_last_24h > 0:
-        status = "warning"
+        overall_status = "warning"
     else:
-        status = "ok"
+        overall_status = "ok"
 
     summary = {
-        "status": status,
+        "status": overall_status,
         "devices_online": devices_online,
         "alerts_last_24h": alerts_last_24h,
         "critical_alerts": critical_alerts,
@@ -718,12 +751,12 @@ def get_dashboard_data(family_id: str) -> Dict[str, Any]:
             "id": d.id,
             "family_id": d.family_id,
             "name": d.name,
-            "status": d.status,
+            "status": status,          # use computed status
             "last_seen": d.last_seen,
             "room": d.room,
             "sensor_settings": d.sensor_settings,
         }
-        for d in devices
+        for d, status in effective_devices
     ]
 
     alerts_for_ui = [
