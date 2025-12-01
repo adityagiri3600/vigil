@@ -232,7 +232,7 @@ const styles = {
     position: "relative",
     borderRadius: "0.75rem",
     overflow: "hidden",
-    height: "260px", // adjust this to make camera bigger/smaller
+    height: "260px",
   },
   cameraImage: {
     width: "100%",
@@ -251,6 +251,54 @@ const styles = {
     fontSize: "0.8rem",
     fontFamily: "monospace",
   },
+
+  // ⬇️ NEW: empty state styles
+  emptyWrapper: {
+    minHeight: "70vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: "1rem",
+    padding: "2rem 1.75rem",
+    boxShadow: "0 10px 30px rgba(15,23,42,0.12)",
+    maxWidth: "420px",
+    textAlign: "center",
+    border: "1px solid rgba(148,163,184,0.35)",
+  },
+  emptyEmoji: {
+    fontSize: "2.5rem",
+    marginBottom: "0.5rem",
+  },
+  emptyTitle: {
+    fontSize: "1.3rem",
+    fontWeight: 600,
+    marginBottom: "0.35rem",
+  },
+  emptyText: {
+    fontSize: "0.9rem",
+    color: "#64748b",
+    marginBottom: "1.1rem",
+  },
+  emptyButton: {
+    display: "inline-block",
+    padding: "0.7rem 1.4rem",
+    borderRadius: "9999px",
+    border: "none",
+    backgroundColor: "#2563eb",
+    color: "#f9fafb",
+    fontSize: "0.95rem",
+    fontWeight: 500,
+    cursor: "pointer",
+    textDecoration: "none",
+  },
+  emptyHint: {
+    marginTop: "0.6rem",
+    fontSize: "0.8rem",
+    color: "#64748b",
+  },
 };
 
 function DashboardPage() {
@@ -265,6 +313,7 @@ function DashboardPage() {
   const [todayStats, setTodayStats] = useState(null);
   const [yesterdayStats, setYesterdayStats] = useState(null);
   const [clock, setClock] = useState(new Date());
+  const [loaded, setLoaded] = useState(false); // ⬅️ NEW
 
   const fetchDashboard = async () => {
     const res = await api.get("/dashboard");
@@ -277,6 +326,7 @@ function DashboardPage() {
     setSafetyScore(res.data.safety_score || null);
     setTodayStats(res.data.today_stats || null);
     setYesterdayStats(res.data.yesterday_stats || null);
+    setLoaded(true); // ⬅️ NEW
   };
 
   useEffect(() => {
@@ -305,6 +355,48 @@ function DashboardPage() {
     .toLocaleTimeString("en-GB", { hour12: false })
     .slice(0, 8);
 
+  // ⬇️ NEW: loading state
+  if (!loaded) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.emptyWrapper}>
+          <div style={styles.emptyCard}>
+            <div style={styles.emptyEmoji}>⏳</div>
+            <div style={styles.emptyTitle}>Loading dashboard...</div>
+            <p style={styles.emptyText}>Please wait a moment.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ⬇️ NEW: pretty "no devices" state
+  if (loaded && devices.length === 0) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.emptyWrapper}>
+          <div style={styles.emptyCard}>
+            <div style={styles.emptyEmoji}>📡</div>
+            <div style={styles.emptyTitle}>No devices connected</div>
+            <p style={styles.emptyText}>
+              아직 VIGIL 센서가 연결되어 있지 않습니다. 에뮬레이터에서 생성한
+              <code> device_qr.png </code>를 카메라로 스캔해 이 가족 계정에
+              장치를 등록하세요.
+            </p>
+            <Link to="/device/scan" style={styles.emptyButton}>
+              Scan device QR code
+            </Link>
+            <div style={styles.emptyHint}>
+              Open <code>device_qr.png</code> on your PC and point your phone
+              camera at it.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ existing dashboard UI unchanged below
   return (
     <div style={styles.page}>
       <h2 style={styles.heading}>{t.dashboard}</h2>

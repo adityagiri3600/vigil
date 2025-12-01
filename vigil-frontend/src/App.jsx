@@ -6,6 +6,7 @@ import DashboardPage from "./features/dashboard/DashboardPage";
 import FamilyPage from "./features/family/FamilyPage";
 import SettingsPage from "./features/settings/SettingsPage";
 import DevicePage from "./features/devices/DevicePage";
+import DeviceScanPage from "./features/device/DeviceScanPage";
 import NavBar from "./components/NavBar";
 
 function ProtectedRoute({ children }) {
@@ -59,6 +60,14 @@ function App() {
           element={
             <ProtectedRoute>
               <DevicePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/device/scan"
+          element={
+            <ProtectedRoute>
+              <DeviceScanPage />
             </ProtectedRoute>
           }
         />
