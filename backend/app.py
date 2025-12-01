@@ -7,6 +7,19 @@ import os
 import json
 from pywebpush import webpush, WebPushException
 
+from sqlalchemy import (
+    create_engine,
+    Column,
+    String,
+    Boolean,
+    Integer,
+    DateTime,
+    ForeignKey,
+    JSON,
+    Text,
+)
+from sqlalchemy.orm import declarative_base, sessionmaker
+
 
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
@@ -15,13 +28,102 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key")
 
-# -------------------------
-# In-memory "data store"
-# -------------------------
-USERS = {}      # email -> {password, name, family_id}
-FAMILIES = {}   # family_id -> [emails]
-ALERTS = []     # list of alerts
-DEVICES = []    # list of devices
+
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL not set")
+
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    future=True,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+)
+
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+Base = declarative_base()
+
+class Family(Base):
+    __tablename__ = "families"
+
+    id = Column(String, primary_key=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    email = Column(String, primary_key=True)
+    password = Column(String, nullable=False)
+    name = Column(String)
+    family_id = Column(String, ForeignKey("families.id"), nullable=False)
+
+
+class Device(Base):
+    __tablename__ = "devices"
+
+    id = Column(String, primary_key=True)
+    family_id = Column(String, ForeignKey("families.id"), nullable=False)
+    name = Column(String, nullable=False)
+    status = Column(String, nullable=False)
+    last_seen = Column(String)
+    room = Column(String)
+    sensor_settings = Column(JSON)
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    family_id = Column(String, nullable=False)
+    type = Column(String)
+    severity = Column(String)
+    room = Column(String)
+    message_en = Column(Text)
+    message_ko = Column(Text)
+    time = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class FamilySettings(Base):
+    __tablename__ = "family_settings"
+
+    family_id = Column(String, primary_key=True)
+    emergency_number = Column(String)
+    auto_call_emergency = Column(Boolean)
+    auto_call_delay_seconds = Column(Integer)
+    notify_family_push = Column(Boolean)
+    notify_family_sms = Column(Boolean)
+    fall_detection_sensitivity = Column(String)
+    video_streaming_enabled = Column(Boolean)
+
+
+class DeviceSettings(Base):
+    __tablename__ = "device_settings"
+
+    device_id = Column(String, primary_key=True)
+    emergency_number = Column(String)
+    auto_call_emergency = Column(Boolean)
+    auto_call_delay_seconds = Column(Integer)
+    fall_detection_sensitivity = Column(String)
+
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    family_id = Column(String, nullable=False)
+    endpoint = Column(Text, unique=True, nullable=False)
+    subscription = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+
+# In-memory "data store" (still used for devices/alerts/settings for now)
+ALERTS = []      # list of alerts
+DEVICES = []     # list of devices
 
 FAMILY_SETTINGS = {}  # family_id -> settings dict
 DEVICE_SETTINGS = {}  # device_id -> settings dict
@@ -36,81 +138,120 @@ DEFAULT_SETTINGS = {
     "video_streaming_enabled": False,
 }
 
-VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "BNkcdEiq6zQ4uqiGLwuFXzgNO4-DCwnA5VrtSN2IGHeKRZryD09BXpYhPGuj-8rnVXhKI3NVldJhZEI1nk25uiM")
-VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "KOIrBACUp3tAjARjQ9sxRYs7W89cF5s41H6n6_PzSjY")
+VAPID_PUBLIC_KEY = os.environ.get(
+    "VAPID_PUBLIC_KEY",
+    "BNkcdEiq6zQ4uqiGLwuFXzgNO4-DCwnA5VrtSN2IGHeKRZryD09BXpYhPGuj-8rnVXhKI3NVldJhZEI1nk25uiM",
+)
+VAPID_PRIVATE_KEY = os.environ.get(
+    "VAPID_PRIVATE_KEY",
+    "KOIrBACUp3tAjARjQ9sxRYs7W89cF5s41H6n6_PzSjY",
+)
 VAPID_CLAIMS = {
-    "sub": "mailto:tootsydeshmukh@gmail.com"
+    "sub": "mailto:tootsydeshmukh@gmail.com",  # NOTE the mailto:
 }
 
 PUSH_SUBSCRIPTIONS = {}  # family_id -> [subscription dicts]
 
 
-# Seed demo data
 def seed_data():
     demo_email = "demo@vigil.com"
     family_id = "FAMILY_DEMO"
 
-    USERS[demo_email] = {
-        "password": "demo123",  # plain text for demo only
-        "name": "Demo Caregiver",
-        "family_id": family_id,
-    }
-    FAMILIES[family_id] = [demo_email]
+    db = SessionLocal()
+    try:
+        # 1) Ensure FAMILY_DEMO exists in families FIRST
+        family = db.get(Family, family_id)
+        if not family:
+            family = Family(id=family_id)
+            db.add(family)
+            db.commit()  # <-- commit so parent row definitely exists
 
-    DEVICES.extend([
-        {
-            "id": "DEV1",
-            "family_id": family_id,
-            "name": "거실 센서 / Living Room Sensor",
-            "status": "online",
-            "last_seen": "5 min ago",
-            "room": "Living Room",
-        },
-        {
-            "id": "DEV2",
-            "family_id": family_id,
-            "name": "침실 센서 / Bedroom Sensor",
-            "status": "online",
-            "last_seen": "12 min ago",
-            "room": "Bedroom",
-        },
-    ])
+        # 2) Ensure demo user exists
+        user = db.get(User, demo_email)
+        if not user:
+            user = User(
+                email=demo_email,
+                password="demo123",  # plain text for demo only
+                name="Demo Caregiver",
+                family_id=family_id,
+            )
+            db.add(user)
 
-    ALERTS.extend([
-        {
-            "family_id": family_id,
-            "type": "fall",
-            "severity": "high",
-            "room": "거실 / Living Room",
-            "message_en": "Possible fall detected",
-            "message_ko": "낙상 가능성이 감지되었습니다.",
-            "time": "2025-11-30 14:05",
-        },
-        {
-            "family_id": family_id,
-            "type": "inactivity",
-            "severity": "medium",
-            "room": "침실 / Bedroom",
-            "message_en": "No movement detected for 3 hours",
-            "message_ko": "3시간 동안 움직임이 없습니다.",
-            "time": "2025-11-30 10:30",
-        },
-    ])
+        # 3) Seed devices (they now see a valid family_id)
+        existing_dev1 = db.get(Device, "DEV1")
+        if not existing_dev1:
+            db.add(
+                Device(
+                    id="DEV1",
+                    family_id=family_id,
+                    name="거실 센서 / Living Room Sensor",
+                    status="online",
+                    last_seen="5 min ago",
+                    room="Living Room",
+                )
+            )
+        existing_dev2 = db.get(Device, "DEV2")
+        if not existing_dev2:
+            db.add(
+                Device(
+                    id="DEV2",
+                    family_id=family_id,
+                    name="침실 센서 / Bedroom Sensor",
+                    status="online",
+                    last_seen="12 min ago",
+                    room="Bedroom",
+                )
+            )
 
-    # Family-wide default settings
-    FAMILY_SETTINGS[family_id] = DEFAULT_SETTINGS.copy()
+        # 4) Alerts – seed only if none exist
+        any_alert = db.query(Alert).first()
+        if not any_alert:
+            db.add_all(
+                [
+                    Alert(
+                        family_id=family_id,
+                        type="fall",
+                        severity="high",
+                        room="거실 / Living Room",
+                        message_en="Possible fall detected",
+                        message_ko="낙상 가능성이 감지되었습니다.",
+                        time=datetime.datetime(2025, 11, 30, 14, 5),
+                    ),
+                    Alert(
+                        family_id=family_id,
+                        type="inactivity",
+                        severity="medium",
+                        room="침실 / Bedroom",
+                        message_en="No movement detected for 3 hours",
+                        message_ko="3시간 동안 움직임이 없습니다.",
+                        time=datetime.datetime(2025, 11, 30, 10, 30),
+                    ),
+                ]
+            )
 
-    # Per-device settings initially follow key emergency-related settings
-    for dev in DEVICES:
-        DEVICE_SETTINGS[dev["id"]] = {
-            "emergency_number": DEFAULT_SETTINGS["emergency_number"],
-            "auto_call_emergency": DEFAULT_SETTINGS["auto_call_emergency"],
-            "auto_call_delay_seconds": DEFAULT_SETTINGS["auto_call_delay_seconds"],
-            "fall_detection_sensitivity": DEFAULT_SETTINGS["fall_detection_sensitivity"],
-        }
+        # 5) Family-wide default settings
+        fam_settings = db.get(FamilySettings, family_id)
+        if not fam_settings:
+            fam_settings = FamilySettings(
+                family_id=family_id,
+                emergency_number=DEFAULT_SETTINGS["emergency_number"],
+                auto_call_emergency=DEFAULT_SETTINGS["auto_call_emergency"],
+                auto_call_delay_seconds=DEFAULT_SETTINGS["auto_call_delay_seconds"],
+                notify_family_push=DEFAULT_SETTINGS["notify_family_push"],
+                notify_family_sms=DEFAULT_SETTINGS["notify_family_sms"],
+                fall_detection_sensitivity=DEFAULT_SETTINGS[
+                    "fall_detection_sensitivity"
+                ],
+                video_streaming_enabled=DEFAULT_SETTINGS["video_streaming_enabled"],
+            )
+            db.add(fam_settings)
+
+        # Final commit for user/devices/alerts/settings
+        db.commit()
+    finally:
+        db.close()
 
 
-seed_data()
 
 # -------------------------
 # Helpers
@@ -156,6 +297,8 @@ def serve_index():
 @app.route("/<path:path>")
 def serve_file(path):
     return send_from_directory(app.static_folder, path)
+
+
 # -------------------------
 # Routes - Auth
 # -------------------------
@@ -170,32 +313,43 @@ def signup():
     if not email or not password:
         return jsonify({"error": "Missing email or password"}), 400
 
-    if email in USERS:
-        return jsonify({"error": "User already exists"}), 400
+    db = SessionLocal()
+    try:
+        existing = db.get(User, email)
+        if existing:
+            return jsonify({"error": "User already exists"}), 400
 
-    # If family_id not provided, create a new family
-    if not family_id:
-        family_id = f"FAMILY_{email.split('@')[0].upper()}"
+        if not family_id:
+            family_id = f"FAMILY_{email.split('@')[0].upper()}"
 
-    USERS[email] = {
-        "password": password,
-        "name": name,
-        "family_id": family_id,
-    }
+        family = db.get(Family, family_id)
+        if not family:
+            family = Family(id=family_id)
+            db.add(family)
 
-    if family_id not in FAMILIES:
-        FAMILIES[family_id] = []
-    FAMILIES[family_id].append(email)
+        user = User(
+            email=email,
+            password=password,
+            name=name,
+            family_id=family_id,
+        )
+        db.add(user)
+        db.commit()
 
-    token = create_token(email, family_id)
-    return jsonify({
-        "token": token,
-        "user": {
-            "email": email,
-            "name": name,
-            "family_id": family_id,
-        }
-    })
+        token = create_token(email, family_id)
+        return jsonify(
+            {
+                "token": token,
+                "user": {
+                    "email": email,
+                    "name": name,
+                    "family_id": family_id,
+                },
+            }
+        )
+    finally:
+        db.close()
+
 
 @app.route("/api/auth/login", methods=["POST"])
 def login():
@@ -206,19 +360,27 @@ def login():
     if not email or not password:
         return jsonify({"error": "Missing email or password"}), 400
 
-    user = USERS.get(email)
-    if not user or user["password"] != password:
+    db = SessionLocal()
+    try:
+        user = db.get(User, email)
+    finally:
+        db.close()
+
+    if not user or user.password != password:
         return jsonify({"error": "Invalid credentials"}), 400
 
-    token = create_token(email, user["family_id"])
-    return jsonify({
-        "token": token,
-        "user": {
-            "email": email,
-            "name": user["name"],
-            "family_id": user["family_id"],
+    token = create_token(user.email, user.family_id)
+    return jsonify(
+        {
+            "token": token,
+            "user": {
+                "email": user.email,
+                "name": user.name,
+                "family_id": user.family_id,
+            },
         }
-    })
+    )
+
 
 # -------------------------
 # Routes - Dashboard
@@ -228,13 +390,28 @@ def login():
 def dashboard():
     family_id = request.family_id
 
-    family_devices = [d for d in DEVICES if d["family_id"] == family_id]
-    family_alerts = [a for a in ALERTS if a["family_id"] == family_id]
+    db = SessionLocal()
+    try:
+        devices = (
+            db.query(Device)
+            .filter(Device.family_id == family_id)
+            .all()
+        )
+
+        alerts = (
+            db.query(Alert)
+            .filter(Alert.family_id == family_id)
+            .order_by(Alert.time.desc())
+            .limit(50)
+            .all()
+        )
+    finally:
+        db.close()
 
     # ---- Summary cards (top bar) ----
-    devices_online = sum(1 for d in family_devices if d["status"] == "online")
-    alerts_last_24h = len(family_alerts)  # dummy: treat all as last 24h
-    critical_alerts = sum(1 for a in family_alerts if a["severity"] == "high")
+    devices_online = sum(1 for d in devices if d.status == "online")
+    alerts_last_24h = len(alerts)  # still dummy: treat all as last 24h
+    critical_alerts = sum(1 for a in alerts if a.severity == "high")
 
     if critical_alerts > 0:
         status = "critical"
@@ -272,7 +449,7 @@ def dashboard():
     base = 100
     base -= critical_alerts * 20
     base -= max(0, alerts_last_24h - critical_alerts) * 5
-    if devices_online < len(family_devices):
+    if devices_online < len(devices):
         base -= 10
     score = max(0, min(100, base))
 
@@ -297,11 +474,35 @@ def dashboard():
         "rooms_visited": list(room_stats.keys()),
     }
 
-    alerts_for_ui = family_alerts[:20]
+    devices_for_ui = [
+        {
+            "id": d.id,
+            "family_id": d.family_id,
+            "name": d.name,
+            "status": d.status,
+            "last_seen": d.last_seen,
+            "room": d.room,
+            "sensor_settings": d.sensor_settings,
+        }
+        for d in devices
+    ]
+
+    alerts_for_ui = [
+        {
+            "family_id": a.family_id,
+            "type": a.type,
+            "severity": a.severity,
+            "room": a.room,
+            "message_en": a.message_en,
+            "message_ko": a.message_ko,
+            "time": a.time.strftime("%Y-%m-%d %H:%M:%S") if a.time else None,
+        }
+        for a in alerts
+    ]
 
     return jsonify({
         "summary": summary,
-        "devices": family_devices,
+        "devices": devices_for_ui,
         "alerts": alerts_for_ui,
         "activity": activity,
         "activity_timeline": activity_timeline,
@@ -312,6 +513,7 @@ def dashboard():
     })
 
 
+
 # -------------------------
 # Routes - Family
 # -------------------------
@@ -319,17 +521,21 @@ def dashboard():
 @token_required
 def family_members():
     family_id = request.family_id
-    member_emails = FAMILIES.get(family_id, [])
-    members = []
-    for email in member_emails:
-        u = USERS.get(email)
-        if not u:
-            continue
-        members.append({
-            "email": email,
-            "name": u["name"],
-        })
+
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(User)
+            .filter(User.family_id == family_id)
+            .order_by(User.email)
+            .all()
+        )
+    finally:
+        db.close()
+
+    members = [{"email": u.email, "name": u.name} for u in rows]
     return jsonify(members)
+
 
 # -------------------------
 # Health
@@ -504,7 +710,8 @@ def push_subscribe():
 
 
 
-
+init_db()
+seed_data()
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)
