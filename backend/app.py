@@ -3,9 +3,9 @@ from flask_cors import CORS
 import jwt
 import datetime
 
-from config import JWT_SECRET
-from db import init_db, seed_data
-from services import (
+from .config import JWT_SECRET
+from .db import init_db, seed_data
+from .services import (
     signup_user,
     login_user,
     get_dashboard_data,

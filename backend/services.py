@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from pywebpush import webpush, WebPushException
 
-from db import (
+from .db import (
     SessionLocal,
     User,
     Family,
@@ -16,7 +16,7 @@ from db import (
     DeviceSettings,
     PushSubscription,
 )
-from config import DEFAULT_SETTINGS, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_CLAIMS
+from .config import DEFAULT_SETTINGS, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_CLAIMS
 
 
 # ---------- DB SESSION HELPER ----------
