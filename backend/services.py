@@ -256,6 +256,123 @@ def update_device_settings(
 
     return result
 
+def register_device_for_family(
+    family_id: str,
+    token: str,
+    name: str,
+    room: str,
+) -> Dict[str, Any]:
+    """
+    Create a new device bound to a family, given a device auth token.
+
+    Called from the app (user is logged in) after scanning the device's QR.
+    """
+    # derive a stable-ish id from token (good enough for prototype)
+    device_id = f"DEV_{token[-8:].upper()}"
+
+    with db_session() as db:
+        # make sure family exists
+        family = db.get(Family, family_id)
+        if not family:
+            family = Family(id=family_id)
+            db.add(family)
+
+        # make sure token isn't already used
+        existing_devices = db.query(Device).all()
+        for d in existing_devices:
+            settings = d.sensor_settings or {}
+            if settings.get("auth_token") == token:
+                raise ValueError("Device with this token is already registered.")
+
+        # simple collision check on id
+        if db.get(Device, device_id):
+            raise ValueError("Device with this ID already exists.")
+
+        dev = Device(
+            id=device_id,
+            family_id=family_id,
+            name=name or "New Sensor",
+            status="online",
+            last_seen="never",
+            room=room or "Unknown",
+            sensor_settings={"auth_token": token},
+        )
+        db.add(dev)
+
+        # thanks to expire_on_commit=False you can access attributes after context
+        result = {
+            "id": dev.id,
+            "family_id": dev.family_id,
+            "name": dev.name,
+            "status": dev.status,
+            "last_seen": dev.last_seen,
+            "room": dev.room,
+            "sensor_settings": dev.sensor_settings,
+        }
+
+    return result
+
+
+def handle_device_event(token: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Process an event sent by a device identified by its auth token.
+
+    Returns a small dict for the HTTP response, or None if device not found.
+    """
+    event_type = payload.get("type") or "unknown"
+    severity = payload.get("severity") or "medium"
+    room = payload.get("room") or "Unknown"
+
+    ts_str = payload.get("timestamp")
+    if ts_str:
+        try:
+            # allow "2025-12-01T10:23:00Z" or with offset
+            timestamp = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except Exception:
+            timestamp = datetime.datetime.utcnow()
+    else:
+        timestamp = datetime.datetime.utcnow()
+
+    with db_session() as db:
+        # find device by auth_token stored in sensor_settings
+        devices = db.query(Device).all()
+        dev: Optional[Device] = None
+        for d in devices:
+            settings = d.sensor_settings or {}
+            if settings.get("auth_token") == token:
+                dev = d
+                break
+
+        if not dev:
+            return None
+
+        # heartbeat: just update status / last_seen
+        if event_type == "heartbeat":
+            dev.status = "online"
+            dev.last_seen = timestamp.isoformat() + "Z"
+            return {"status": "ok", "device_id": dev.id}
+
+        # otherwise create an alert row
+        alert = Alert(
+            family_id=dev.family_id,
+            type=event_type,
+            severity=severity,
+            room=room,
+            message_en=payload.get(
+                "message_en", f"{event_type.capitalize()} event from device {dev.id}"
+            ),
+            message_ko=payload.get("message_ko"),
+            time=timestamp,
+        )
+        db.add(alert)
+
+        return {
+            "status": "alert_created",
+            "device_id": dev.id,
+            "event_type": event_type,
+        }
+
+
 
 # ---------- DEVICES CRUD ----------
 

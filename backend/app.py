@@ -23,6 +23,8 @@ from .services import (
     delete_alert,
     create_demo_alert,
     subscribe_push,
+    register_device_for_family,
+    handle_device_event,
 )
 
 
@@ -220,6 +222,47 @@ def demo_alert(device_id):
     if not result:
         return jsonify({"error": "Device not found"}), 404
     return jsonify(result)
+
+@app.route("/api/devices/register", methods=["POST"])
+@token_required
+def register_device_route():
+    """Called from the app after scanning the device's QR."""
+    family_id = request.family_id
+    data = request.json or {}
+
+    token = data.get("token")
+    name = data.get("name", "New Sensor")
+    room = data.get("room", "Unknown")
+
+    if not token:
+        return jsonify({"error": "Missing device token"}), 400
+
+    try:
+        device = register_device_for_family(family_id, token, name, room)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    return jsonify(device), 201
+
+@app.route("/api/device-events", methods=["POST"])
+def device_events():
+    """
+    Endpoint for physical devices / emulator.
+
+    Auth: X-Device-Token header (or 'token' field in JSON body).
+    """
+    data = request.json or {}
+
+    token = request.headers.get("X-Device-Token") or data.get("token")
+    if not token:
+        return jsonify({"error": "Missing device token"}), 401
+
+    result = handle_device_event(token, data)
+    if result is None:
+        return jsonify({"error": "Unknown device"}), 404
+
+    return jsonify(result)
+
 
 
 # ---------- ALERTS CRUD ----------
