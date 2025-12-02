@@ -120,8 +120,3 @@ class Motion(Base):
     device_id = Column(String, ForeignKey("devices.id"), nullable=False)
     # TIMESTAMPTZ in Postgres -> timezone-aware DateTime here
     ts = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-# ---------- INIT / SEED ----------
-
-def init_db():
-    Base.metadata.create_all(bind=engine)

@@ -3,8 +3,11 @@ from flask_cors import CORS
 import jwt
 import datetime
 
+from .db import PushSubscription
+
 from .config import JWT_SECRET
 from .services import (
+    db_session,
     signup_user,
     login_user,
     get_dashboard_data,
@@ -295,14 +298,36 @@ def delete_alert_route(alert_id):
 
 @app.route("/api/push/subscribe", methods=["POST"])
 @token_required
-def push_subscribe_route():
+def push_subscribe():
     family_id = request.family_id
-    subscription = request.json or {}
+    subscription = request.json
 
-    try:
-        subscribe_push(family_id, subscription)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+    if not subscription or "endpoint" not in subscription:
+        return jsonify({"error": "Missing subscription"}), 400
+
+    endpoint = subscription["endpoint"]
+
+    with db_session() as db:
+        existing = (
+            db.query(PushSubscription)
+            .filter(
+                PushSubscription.endpoint == endpoint,
+                PushSubscription.family_id == family_id,
+            )
+            .first()
+        )
+
+        if existing:
+            # Update stored subscription JSON in case browser rotated keys
+            existing.subscription = subscription
+        else:
+            db.add(
+                PushSubscription(
+                    family_id=family_id,
+                    endpoint=endpoint,
+                    subscription=subscription,
+                )
+            )
 
     return jsonify({"status": "ok"})
 

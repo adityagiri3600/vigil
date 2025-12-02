@@ -560,8 +560,8 @@ def delete_alert(family_id: str, alert_id: int) -> bool:
 
     return True
 
-
 def create_demo_alert(family_id: str, device_id: str) -> Optional[Dict[str, Any]]:
+    """Create a demo alert for a device and send web push to all family subscriptions."""
     now = datetime.datetime.utcnow()
 
     with db_session() as db:
@@ -573,13 +573,17 @@ def create_demo_alert(family_id: str, device_id: str) -> Optional[Dict[str, Any]
         if not dev:
             return None
 
+        # Store primitive values so we don't care about session expiry later
+        dev_name = dev.name
+        dev_room = dev.room
+
         alert = Alert(
             family_id=family_id,
             type="demo",
             severity="medium",
-            room=dev.room,
-            message_en=f"Demo alert from {dev.name}",
-            message_ko=f"테스트 알림: {dev.name}",
+            room=dev_room,
+            message_en=f"Demo alert from {dev_name}",
+            message_ko=f"테스트 알림: {dev_name}",
             time=now,
         )
         db.add(alert)
@@ -589,14 +593,19 @@ def create_demo_alert(family_id: str, device_id: str) -> Optional[Dict[str, Any]
             .filter(PushSubscription.family_id == family_id)
             .all()
         )
+
+        # Copy subscription payloads out of the session
         subs_payloads = [s.subscription for s in subs]
 
-    # Send web push outside the session
+    # --- Send web push outside the DB session ---
     payload = {
         "title": "VIGIL Demo Alert",
-        "body": f"{dev.name} in {dev.room} sent a demo alert.",
-        "url": "/",
+        "body": f"{dev_name} in {dev_room} sent a demo alert.",
+        "url": "/",  # where clicking notification should open
     }
+
+    ok_count = 0
+    fail_count = 0
 
     for sub in subs_payloads:
         try:
@@ -606,10 +615,18 @@ def create_demo_alert(family_id: str, device_id: str) -> Optional[Dict[str, Any]
                 vapid_private_key=VAPID_PRIVATE_KEY,
                 vapid_claims=VAPID_CLAIMS,
             )
+            ok_count += 1
         except WebPushException as ex:
             print("WebPush failed:", repr(ex))
+            fail_count += 1
 
-    return {"status": "sent"}
+    return {
+        "status": "sent",
+        "device_id": device_id,
+        "sent_to": ok_count,
+        "failed": fail_count,
+    }
+
 
 # ---------- MOTIONS ----------
 
