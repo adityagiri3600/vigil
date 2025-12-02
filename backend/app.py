@@ -4,7 +4,6 @@ import jwt
 import datetime
 
 from .config import JWT_SECRET
-from .db import init_db, seed_data
 from .services import (
     signup_user,
     login_user,
@@ -313,12 +312,6 @@ def push_subscribe_route():
 @app.route("/api/health")
 def health():
     return {"status": "ok"}
-
-
-# ---------- BOOTSTRAP DB ----------
-
-init_db()
-seed_data()
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)

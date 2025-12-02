@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from pywebpush import webpush, WebPushException
 
 from .db import (
+    Motion,
     SessionLocal,
     User,
     Family,
@@ -610,6 +611,16 @@ def create_demo_alert(family_id: str, device_id: str) -> Optional[Dict[str, Any]
 
     return {"status": "sent"}
 
+# ---------- MOTIONS ----------
+
+def log_motion(device_id: str, ts: Optional[datetime.datetime] = None) -> None:
+    """Insert a motion event for a device."""
+    if ts is None:
+        ts = datetime.datetime.now(datetime.timezone.utc)
+    with db_session() as db:
+        db.add(Motion(device_id=device_id, ts=ts))
+        db.commit()
+
 
 # ---------- PUSH SUBSCRIPTIONS ----------
 
@@ -641,7 +652,9 @@ def subscribe_push(family_id: str, subscription: Dict[str, Any]) -> None:
 def get_dashboard_data(family_id: str) -> Dict[str, Any]:
     ONLINE_GRACE_SECONDS = 60
 
-    def compute_device_status(last_seen: Optional[str], stored_status: Optional[str]) -> str:
+    def compute_device_status(
+        last_seen: Optional[str], stored_status: Optional[str]
+    ) -> str:
         """Return 'online' or 'offline' from last_seen; treat parse failures as offline."""
         s = (last_seen or "").strip()
         if not s or s == "never":
@@ -649,7 +662,9 @@ def get_dashboard_data(family_id: str) -> Dict[str, Any]:
         try:
             if s.endswith("Z"):
                 # 'YYYY-mm-ddTHH:MM:SS(.fff)Z'
-                dt = datetime.datetime.fromisoformat(s[:-1]).replace(tzinfo=datetime.timezone.utc)
+                dt = datetime.datetime.fromisoformat(s[:-1]).replace(
+                    tzinfo=datetime.timezone.utc
+                )
             else:
                 # 'YYYY-mm-ddTHH:MM:SS(.fff)+HH:MM' or naive
                 dt = datetime.datetime.fromisoformat(s)
@@ -659,18 +674,57 @@ def get_dashboard_data(family_id: str) -> Dict[str, Any]:
             delta = now_utc - dt.astimezone(datetime.timezone.utc)
             return "online" if delta.total_seconds() <= ONLINE_GRACE_SECONDS else "offline"
         except Exception:
-            # malformed strings (e.g. "+00:00Z") → offline
+            # malformed strings → offline
             return "offline"
 
+    def humanize_last_motion(last_ts: Optional[datetime.datetime]) -> str:
+        if last_ts is None:
+            return "No motion yet"
+        if last_ts.tzinfo is None:
+            last_ts = last_ts.replace(tzinfo=datetime.timezone.utc)
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        delta = now_utc - last_ts
+        secs = int(delta.total_seconds())
+        if secs < 60:
+            return "just now"
+        if secs < 3600:
+            return f"{secs // 60} min ago"
+        if secs < 86400:
+            return f"{secs // 3600} hr ago"
+        return f"{secs // 86400} d ago"
 
+    now_utc_naive = datetime.datetime.utcnow()
+    now_utc_aware = datetime.datetime.now(datetime.timezone.utc)
 
     with db_session() as db:
-        devices = (
+        # ---------- Devices ----------
+        device_rows = (
             db.query(Device)
             .filter(Device.family_id == family_id)
             .all()
         )
-        alerts = (
+
+        effective_devices: List[Dict[str, Any]] = []
+        devices_online = 0
+
+        for d in device_rows:
+            status = compute_device_status(d.last_seen, d.status)
+            if status == "online":
+                devices_online += 1
+            effective_devices.append(
+                {
+                    "id": d.id,
+                    "family_id": d.family_id,
+                    "name": d.name,
+                    "status": status,  # computed
+                    "last_seen": d.last_seen,
+                    "room": d.room,
+                    "sensor_settings": d.sensor_settings,
+                }
+            )
+
+        # ---------- Alerts ----------
+        alert_rows = (
             db.query(Alert)
             .filter(Alert.family_id == family_id)
             .order_by(Alert.time.desc())
@@ -678,15 +732,101 @@ def get_dashboard_data(family_id: str) -> Dict[str, Any]:
             .all()
         )
 
-    # compute effective status for each device
-    effective_devices: List[Tuple[Device, str]] = []
-    for d in devices:
-        status = compute_device_status(d.last_seen, d.status)
-        effective_devices.append((d, status))
+        alerts_for_ui: List[Dict[str, Any]] = []
+        critical_alerts = 0
+        threshold_24h_alerts = now_utc_naive - datetime.timedelta(hours=24)
+        alerts_last_24h = 0
 
-    devices_online = sum(1 for _, status in effective_devices if status == "online")
-    alerts_last_24h = len(alerts)  # todo: filter by time if needed
-    critical_alerts = sum(1 for a in alerts if a.severity == "high")
+        for a in alert_rows:
+            alerts_for_ui.append(
+                {
+                    "id": a.id,
+                    "family_id": a.family_id,
+                    "type": a.type,
+                    "severity": a.severity,
+                    "room": a.room,
+                    "message_en": a.message_en,
+                    "message_ko": a.message_ko,
+                    "time": a.time.strftime("%Y-%m-%d %H:%M:%S") if a.time else None,
+                }
+            )
+            if a.severity == "high":
+                critical_alerts += 1
+            if a.time is not None and a.time >= threshold_24h_alerts:
+                alerts_last_24h += 1
+
+        # ---------- Motions (for activity / rooms / today/yesterday) ----------
+        base_motion_q = (
+            db.query(Motion, Device)
+            .join(Device, Motion.device_id == Device.id)
+            .filter(Device.family_id == family_id)
+        )
+
+        # Motions in last 24h for timeline + room usage + rooms_visited
+        threshold_24h_motions = now_utc_aware - datetime.timedelta(hours=24)
+        motions_last_24 = (
+            base_motion_q
+            .filter(Motion.ts >= threshold_24h_motions)
+            .all()
+        )
+
+        hour_counts: Dict[str, int] = {}
+        room_counts: Dict[str, int] = {}
+        rooms_visited_set = set()
+
+        for motion, device in motions_last_24:
+            ts = motion.ts
+            if ts is None:
+                continue
+            if ts.tzinfo is None:
+                ts_utc = ts.replace(tzinfo=datetime.timezone.utc)
+            else:
+                ts_utc = ts.astimezone(datetime.timezone.utc)
+
+            # bucket by hour label "HH:00"
+            label = ts_utc.strftime("%H:00")
+            hour_counts[label] = hour_counts.get(label, 0) + 1
+
+            room_name = device.room or "Unknown"
+            room_counts[room_name] = room_counts.get(room_name, 0) + 1
+            rooms_visited_set.add(room_name)
+
+        activity_timeline = [
+            {"label": label, "motions": motions}
+            for label, motions in sorted(hour_counts.items())
+        ]
+        room_stats = room_counts
+
+        # Today vs yesterday (motions)
+        today_start = now_utc_aware.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        tomorrow_start = today_start + datetime.timedelta(days=1)
+        yesterday_start = today_start - datetime.timedelta(days=1)
+
+        motions_today_count = (
+            base_motion_q
+            .filter(Motion.ts >= today_start, Motion.ts < tomorrow_start)
+            .count()
+        )
+        motions_yesterday_count = (
+            base_motion_q
+            .filter(Motion.ts >= yesterday_start, Motion.ts < today_start)
+            .count()
+        )
+
+        # Last motion timestamp (for "5 min ago" style text)
+        last_motion_row = (
+            base_motion_q
+            .order_by(Motion.ts.desc())
+            .first()
+        )
+        if last_motion_row is not None:
+            last_motion_ts = last_motion_row[0].ts
+        else:
+            last_motion_ts = None
+
+    # ---------- Summary / safety / stats assembled outside the session ----------
 
     if critical_alerts > 0:
         overall_status = "critical"
@@ -702,28 +842,12 @@ def get_dashboard_data(family_id: str) -> Dict[str, Any]:
         "critical_alerts": critical_alerts,
     }
 
-    activity_timeline = [
-        {"label": "06:00", "motions": 2},
-        {"label": "09:00", "motions": 5},
-        {"label": "12:00", "motions": 3},
-        {"label": "15:00", "motions": 4},
-        {"label": "18:00", "motions": 6},
-        {"label": "21:00", "motions": 2},
-    ]
-
-    room_stats = {
-        "Living Room": 12,
-        "Kitchen": 4,
-        "Bedroom": 8,
-        "Bathroom": 2,
-    }
-
-    base = 100
-    base -= critical_alerts * 20
-    base -= max(0, alerts_last_24h - critical_alerts) * 5
-    if devices_online < len(devices):
-        base -= 10
-    score = max(0, min(100, base))
+    base_score = 100
+    base_score -= critical_alerts * 20
+    base_score -= max(0, alerts_last_24h - critical_alerts) * 5
+    if devices_online < len(effective_devices):
+        base_score -= 10
+    score = max(0, min(100, base_score))
 
     safety_score = {
         "score": score,
@@ -732,50 +856,23 @@ def get_dashboard_data(family_id: str) -> Dict[str, Any]:
     }
 
     today_stats = {
-        "alerts": alerts_last_24h,
-        "motions": 40,
+        "alerts": alerts_last_24h,  # still approximate; can refine later
+        "motions": motions_today_count,
     }
     yesterday_stats = {
-        "alerts": max(0, alerts_last_24h - 1),
-        "motions": 35,
+        "alerts": max(0, alerts_last_24h - 1),  # placeholder as before
+        "motions": motions_yesterday_count,
     }
 
     activity = {
-        "today_active": True,
-        "last_motion": "5 min ago",
-        "rooms_visited": list(room_stats.keys()),
+        "today_active": motions_today_count > 0,
+        "last_motion": humanize_last_motion(last_motion_ts),
+        "rooms_visited": sorted(rooms_visited_set),
     }
-
-    devices_for_ui = [
-        {
-            "id": d.id,
-            "family_id": d.family_id,
-            "name": d.name,
-            "status": status,          # use computed status
-            "last_seen": d.last_seen,
-            "room": d.room,
-            "sensor_settings": d.sensor_settings,
-        }
-        for d, status in effective_devices
-    ]
-
-    alerts_for_ui = [
-        {
-            "id": a.id,
-            "family_id": a.family_id,
-            "type": a.type,
-            "severity": a.severity,
-            "room": a.room,
-            "message_en": a.message_en,
-            "message_ko": a.message_ko,
-            "time": a.time.strftime("%Y-%m-%d %H:%M:%S") if a.time else None,
-        }
-        for a in alerts
-    ]
 
     return {
         "summary": summary,
-        "devices": devices_for_ui,
+        "devices": effective_devices,
         "alerts": alerts_for_ui,
         "activity": activity,
         "activity_timeline": activity_timeline,
