@@ -5,9 +5,9 @@ import { useLang } from "../../LanguageContext";
 import {
   FiAlertTriangle,
   FiActivity,
-  FiCamera,
   FiCpu,
 } from "react-icons/fi";
+import { motion } from "framer-motion";
 
 const styles = {
   page: {
@@ -16,9 +16,48 @@ const styles = {
     backgroundColor: "#f3f4f6",
     minHeight: "100vh",
   },
-  heading: {
+  headingRow: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.5rem",
     marginBottom: "1rem",
   },
+  heading: {
+    margin: 0,
+  },
+  // Today snapshot strip
+  snapshotRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "0.5rem",
+  },
+  snapshotChip: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    padding: "0.4rem 0.8rem",
+    borderRadius: "9999px",
+    background:
+      "linear-gradient(135deg, rgba(15,23,42,0.02), rgba(37,99,235,0.03))",
+    border: "1px solid rgba(148,163,184,0.35)",
+    fontSize: "0.8rem",
+    boxShadow: "0 4px 10px rgba(15,23,42,0.05)",
+  },
+  snapshotDot: (color) => ({
+    width: 6,
+    height: 6,
+    borderRadius: "9999px",
+    backgroundColor: color,
+    flexShrink: 0,
+  }),
+  snapshotLabel: {
+    color: "#64748b",
+  },
+  snapshotValue: {
+    fontWeight: 600,
+    color: "#0f172a",
+  },
+
   summaryGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
@@ -65,11 +104,14 @@ const styles = {
   cardTitle: {
     marginTop: 0,
     marginBottom: "0.75rem",
-    fontSize: "1rem",
+    fontSize: "0.9rem",
     fontWeight: 600,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
     display: "flex",
     alignItems: "center",
     gap: "0.35rem",
+    color: "#4b5563",
   },
   icon: {
     verticalAlign: "middle",
@@ -159,6 +201,7 @@ const styles = {
     borderRadius: "9999px 9999px 0 0",
     backgroundColor: "#3b82f6",
     height: `${height}px`,
+    transition: "height 0.3s ease",
   }),
   timelineLabel: {
     fontSize: "0.7rem",
@@ -227,32 +270,8 @@ const styles = {
     fontWeight: 500,
     marginBottom: "0.25rem",
   },
-  // camera
-  cameraContainer: {
-    position: "relative",
-    borderRadius: "0.75rem",
-    overflow: "hidden",
-    height: "260px",
-  },
-  cameraImage: {
-    width: "100%",
-    height: "100%",
-    display: "block",
-    objectFit: "cover",
-  },
-  clockOverlay: {
-    position: "absolute",
-    top: "8px",
-    left: "8px",
-    backgroundColor: "rgba(0,0,0,0.6)",
-    color: "#ffffff",
-    padding: "4px 10px",
-    borderRadius: "9999px",
-    fontSize: "0.8rem",
-    fontFamily: "monospace",
-  },
 
-  // ⬇️ NEW: empty state styles
+  // empty state styles
   emptyWrapper: {
     minHeight: "70vh",
     display: "flex",
@@ -312,8 +331,7 @@ function DashboardPage() {
   const [safetyScore, setSafetyScore] = useState(null);
   const [todayStats, setTodayStats] = useState(null);
   const [yesterdayStats, setYesterdayStats] = useState(null);
-  const [clock, setClock] = useState(new Date());
-  const [loaded, setLoaded] = useState(false); // ⬅️ NEW
+  const [loaded, setLoaded] = useState(false);
 
   const fetchDashboard = async () => {
     const res = await api.get("/dashboard");
@@ -326,17 +344,12 @@ function DashboardPage() {
     setSafetyScore(res.data.safety_score || null);
     setTodayStats(res.data.today_stats || null);
     setYesterdayStats(res.data.yesterday_stats || null);
-    setLoaded(true); // ⬅️ NEW
+    setLoaded(true);
   };
 
   useEffect(() => {
     fetchDashboard();
     const id = setInterval(fetchDashboard, 15000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    const id = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -351,31 +364,66 @@ function DashboardPage() {
     return "🟢 OK";
   };
 
-  const clockString = clock
-    .toLocaleTimeString("en-GB", { hour12: false })
-    .slice(0, 8);
+  // snapshot strip values
+  const totalMotionsToday = todayStats?.motions ?? 0;
+  const devicesOnline = summary?.devices_online ?? 0;
+  const totalDevices = devices.length;
+  const lastAlert = alerts[0];
 
-  // ⬇️ NEW: loading state
+  const snapshotItems = [
+    {
+      key: "motions",
+      color: "#3b82f6",
+      label: "Motions today",
+      value: totalMotionsToday,
+    },
+    {
+      key: "devices",
+      color: devicesOnline > 0 ? "#22c55e" : "#f97316",
+      label: "Devices online",
+      value: `${devicesOnline}/${totalDevices || 0}`,
+    },
+    {
+      key: "lastAlert",
+      color: lastAlert ? "#ef4444" : "#9ca3af",
+      label: "Last alert",
+      value: lastAlert
+        ? `${lastAlert.time} · ${lastAlert.room}`
+        : "No alerts yet",
+    },
+  ];
+
+  // loading state
   if (!loaded) {
     return (
       <div style={styles.page}>
         <div style={styles.emptyWrapper}>
-          <div style={styles.emptyCard}>
+          <motion.div
+            style={styles.emptyCard}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+          >
             <div style={styles.emptyEmoji}>⏳</div>
             <div style={styles.emptyTitle}>Loading dashboard...</div>
             <p style={styles.emptyText}>Please wait a moment.</p>
-          </div>
+          </motion.div>
         </div>
       </div>
     );
   }
 
-  // ⬇️ NEW: pretty "no devices" state
+  // no devices state
   if (loaded && devices.length === 0) {
     return (
       <div style={styles.page}>
         <div style={styles.emptyWrapper}>
-          <div style={styles.emptyCard}>
+          <motion.div
+            style={styles.emptyCard}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+          >
             <div style={styles.emptyEmoji}>📡</div>
             <div style={styles.emptyTitle}>No devices connected</div>
             <p style={styles.emptyText}>
@@ -390,20 +438,50 @@ function DashboardPage() {
               Open <code>device_qr.png</code> on your PC and point your phone
               camera at it.
             </div>
-          </div>
+          </motion.div>
         </div>
       </div>
     );
   }
 
-  // ✅ existing dashboard UI unchanged below
   return (
     <div style={styles.page}>
-      <h2 style={styles.heading}>{t.dashboard}</h2>
+      {/* heading + today snapshot */}
+      <div style={styles.headingRow}>
+        <h2 style={styles.heading}>{t.dashboard}</h2>
+
+        {summary && (
+          <motion.div
+            style={styles.snapshotRow}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+          >
+            {snapshotItems.map((item, index) => (
+              <motion.div
+                key={item.key}
+                style={styles.snapshotChip}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: 0.05 * index }}
+              >
+                <span style={styles.snapshotDot(item.color)} />
+                <span style={styles.snapshotLabel}>{item.label}</span>
+                <span style={styles.snapshotValue}>{item.value}</span>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </div>
 
       {/* SUMMARY BAR */}
       {summary && (
-        <div style={styles.summaryGrid}>
+        <motion.div
+          style={styles.summaryGrid}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+        >
           <div
             style={styles.summaryCard}
             title="Overall system status for this family."
@@ -453,11 +531,16 @@ function DashboardPage() {
             </div>
             <div style={styles.summarySub}>high severity</div>
           </div>
-        </div>
+        </motion.div>
       )}
 
       {/* MAIN GRID */}
-      <div style={styles.grid}>
+      <motion.div
+        style={styles.grid}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+      >
         {/* Alerts timeline */}
         <section style={styles.card}>
           <h3
@@ -626,25 +709,6 @@ function DashboardPage() {
           </div>
         </section>
 
-        {/* Camera feed – static image + realtime clock */}
-        <section style={styles.card}>
-          <h3
-            style={styles.cardTitle}
-            title="Simulated camera view. In a real deployment, this would be a live feed."
-          >
-            <FiCamera style={styles.icon} />
-            {t.cameraFeed}
-          </h3>
-          <div style={styles.cameraContainer}>
-            <div style={styles.clockOverlay}>{clockString}</div>
-            <img
-              src="/camera_demo.jpg"
-              alt="Camera feed"
-              style={styles.cameraImage}
-            />
-          </div>
-        </section>
-
         {/* Simple recent activity */}
         <section style={styles.card}>
           <h3 style={styles.cardTitle}>{t.recentActivity}</h3>
@@ -659,7 +723,7 @@ function DashboardPage() {
             </div>
           )}
         </section>
-      </div>
+      </motion.div>
     </div>
   );
 }
