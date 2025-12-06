@@ -351,29 +351,45 @@ def handle_device_event(token: str, payload: Dict[str, Any]) -> Optional[Dict[st
         dev.last_seen = ts_utc.isoformat().replace("+00:00", "Z")
         dev.status = "online"
 
+        # save these so we can use them outside the session
+        dev_id = dev.id
+        dev_family_id = dev.family_id
+        dev_name = dev.name
+        dev_room = room or (dev.room or "Unknown")
+
         if event_type == "heartbeat":
-            # heartbeat: nothing more to do
-            return {"status": "ok", "device_id": dev.id}
+            # heartbeat: nothing more to do, no notification
+            return {"status": "ok", "device_id": dev_id}
 
         # Otherwise: create alert
         alert = Alert(
-            family_id=dev.family_id,
+            family_id=dev_family_id,
             type=event_type,
             severity=severity,
-            room=room,
+            room=dev_room,
             message_en=payload.get(
-                "message_en", f"{event_type.capitalize()} event from device {dev.id}"
+                "message_en",
+                f"{event_type.capitalize()} event from device {dev_id}",
             ),
             message_ko=payload.get("message_ko", None),
             time=timestamp,
         )
         db.add(alert)
 
-        return {
-            "status": "alert_created",
-            "device_id": dev.id,
-            "event_type": event_type,
-        }
+    # --- send push notification outside DB session ---
+    title = "VIGIL Alert"
+    body = payload.get(
+        "notification_body",
+        f"{event_type.capitalize()} detected by {dev_name} in {dev_room}.",
+    )
+    push_result = _send_push_to_family(dev_family_id, title, body, url="/")
+
+    return {
+        "status": "alert_created",
+        "device_id": dev_id,
+        "event_type": event_type,
+        **push_result,
+    }
 
 
 
@@ -493,6 +509,47 @@ def delete_device(family_id: str, device_id: str) -> bool:
 
 # ---------- ALERTS CRUD + DEMO ALERT ----------
 
+def _send_push_to_family(
+    family_id: str,
+    title: str,
+    body: str,
+    url: str = "/",
+) -> Dict[str, int]:
+    """Send a web push notification to all push subscriptions of a family."""
+    # First fetch subscriptions from DB
+    with db_session() as db:
+        subs = (
+            db.query(PushSubscription)
+            .filter(PushSubscription.family_id == family_id)
+            .all()
+        )
+        subs_payloads = [s.subscription for s in subs]
+
+    payload = {
+        "title": title,
+        "body": body,
+        "url": url,
+    }
+
+    ok_count = 0
+    fail_count = 0
+
+    for sub in subs_payloads:
+        try:
+            webpush(
+                subscription_info=sub,
+                data=json.dumps(payload),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims=VAPID_CLAIMS,
+            )
+            ok_count += 1
+        except WebPushException as ex:
+            print("WebPush failed:", repr(ex))
+            fail_count += 1
+
+    return {"sent_to": ok_count, "failed": fail_count}
+
+
 def list_alerts(family_id: str, limit: int = 50) -> List[Dict[str, Any]]:
     with db_session() as db:
         alerts = (
@@ -520,14 +577,21 @@ def list_alerts(family_id: str, limit: int = 50) -> List[Dict[str, Any]]:
 
 def create_alert(family_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     now = datetime.datetime.utcnow()
+
+    alert_type = payload.get("type", "custom")
+    severity = payload.get("severity", "medium")
+    room = payload.get("room", "Unknown")
+    msg_en = payload.get("message_en", "")
+    msg_ko = payload.get("message_ko", "")
+
     with db_session() as db:
         alert = Alert(
             family_id=family_id,
-            type=payload.get("type", "custom"),
-            severity=payload.get("severity", "medium"),
-            room=payload.get("room", "Unknown"),
-            message_en=payload.get("message_en", ""),
-            message_ko=payload.get("message_ko", ""),
+            type=alert_type,
+            severity=severity,
+            room=room,
+            message_en=msg_en,
+            message_ko=msg_ko,
             time=now,
         )
         db.add(alert)
@@ -543,7 +607,14 @@ def create_alert(family_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             "time": alert.time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
+    # --- push notification for manual alert ---
+    title = "VIGIL Alert"
+    # fallback message if none provided
+    body = msg_en or f"{alert_type.capitalize()} alert in {room}."
+    _send_push_to_family(family_id, title, body, url="/")
+
     return result
+
 
 
 def delete_alert(family_id: str, alert_id: int) -> bool:
@@ -573,9 +644,8 @@ def create_demo_alert(family_id: str, device_id: str) -> Optional[Dict[str, Any]
         if not dev:
             return None
 
-        # Store primitive values so we don't care about session expiry later
         dev_name = dev.name
-        dev_room = dev.room
+        dev_room = dev.room or "Unknown"
 
         alert = Alert(
             family_id=family_id,
@@ -588,44 +658,20 @@ def create_demo_alert(family_id: str, device_id: str) -> Optional[Dict[str, Any]
         )
         db.add(alert)
 
-        subs = (
-            db.query(PushSubscription)
-            .filter(PushSubscription.family_id == family_id)
-            .all()
-        )
-
-        # Copy subscription payloads out of the session
-        subs_payloads = [s.subscription for s in subs]
-
-    # --- Send web push outside the DB session ---
-    payload = {
-        "title": "VIGIL Demo Alert",
-        "body": f"{dev_name} in {dev_room} sent a demo alert.",
-        "url": "/",  # where clicking notification should open
-    }
-
-    ok_count = 0
-    fail_count = 0
-
-    for sub in subs_payloads:
-        try:
-            webpush(
-                subscription_info=sub,
-                data=json.dumps(payload),
-                vapid_private_key=VAPID_PRIVATE_KEY,
-                vapid_claims=VAPID_CLAIMS,
-            )
-            ok_count += 1
-        except WebPushException as ex:
-            print("WebPush failed:", repr(ex))
-            fail_count += 1
+    # send push outside the session
+    push_result = _send_push_to_family(
+        family_id,
+        "VIGIL Demo Alert",
+        f"{dev_name} in {dev_room} sent a demo alert.",
+        url="/",
+    )
 
     return {
         "status": "sent",
         "device_id": device_id,
-        "sent_to": ok_count,
-        "failed": fail_count,
+        **push_result,
     }
+
 
 
 # ---------- MOTIONS ----------
